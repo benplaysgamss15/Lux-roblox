@@ -122,7 +122,7 @@
 
         // --- 2. PLAYER (Roblox "Noob" Avatar) ---
         const player = new THREE.Group();
-        player.position.set(0, 0, 15);
+        player.position.set(0, 2, 15); // FIXED BUG 1: Elevated Y by 2 units so feet are firmly on the floor
         scene.add(player);
 
         const matHead = new THREE.MeshLambertMaterial({ color: 0xf1c232 }); // Yellow
@@ -174,7 +174,6 @@
             for(let i=0; i<e.changedTouches.length; i++) {
                 const touch = e.changedTouches[i];
                 if(touch.clientX < window.innerWidth / 2 && moveTouchId === null) {
-                    // Left Side -> Move
                     moveTouchId = touch.identifier;
                     joystickStart = { x: touch.clientX, y: touch.clientY };
                     joyBaseEl.style.display = 'block';
@@ -182,7 +181,6 @@
                     joyBaseEl.style.top = (touch.clientY - 60) + 'px';
                     joyStickEl.style.transform = `translate(-50%, -50%)`;
                 } else if(touch.clientX >= window.innerWidth / 2 && lookTouchId === null) {
-                    // Right Side -> Look
                     lookTouchId = touch.identifier;
                     lastLookPos = { x: touch.clientX, y: touch.clientY };
                 }
@@ -193,7 +191,6 @@
             for(let i=0; i<e.changedTouches.length; i++) {
                 const touch = e.changedTouches[i];
                 if(touch.identifier === moveTouchId) {
-                    // Update Joystick
                     let dx = touch.clientX - joystickStart.x;
                     let dy = touch.clientY - joystickStart.y;
                     const distance = Math.sqrt(dx*dx + dy*dy);
@@ -203,17 +200,13 @@
                         dy = (dy / distance) * maxRadius;
                     }
                     joyStickEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-                    
-                    // Normalize for movement
                     joystickVector.x = dx / maxRadius;
                     joystickVector.y = dy / maxRadius;
                 } else if(touch.identifier === lookTouchId) {
-                    // Update Camera
                     const dx = touch.clientX - lastLookPos.x;
                     const dy = touch.clientY - lastLookPos.y;
                     camAngle -= dx * 0.005;
                     camPitch -= dy * 0.005;
-                    // Clamp pitch so camera doesn't go under floor or over head
                     camPitch = Math.max(0.1, Math.min(Math.PI / 2.2, camPitch));
                     lastLookPos = { x: touch.clientX, y: touch.clientY };
                 }
@@ -255,8 +248,8 @@
         let lastDropTime = 0;
         
         const cashDisplay = document.getElementById('cash-display');
-        const activeButtons = [];
-        const activeDroppers =[];
+        const activeButtons =[];
+        const activeDroppers = [];
         const droppedItems =[];
         let collectorZone = null;
 
@@ -267,8 +260,8 @@
             setTimeout(() => { cashDisplay.style.color = '#4CAF50'; }, 300);
         }
 
-        // Helper: Create 3D Text Sprite
-        function createTextSprite(message, color) {
+        // Helper: Create 3D Text Texture
+        function createTextTexture(message, color) {
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             canvas.width = 512; canvas.height = 256;
@@ -276,30 +269,38 @@
             context.font = "Bold 40px 'Segoe UI'";
             context.textAlign = "center";
             context.fillText(message, 256, 128);
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            const spriteMat = new THREE.SpriteMaterial({ map: texture });
-            const sprite = new THREE.Sprite(spriteMat);
-            sprite.scale.set(6, 3, 1);
-            return sprite;
+            return new THREE.CanvasTexture(canvas);
         }
 
         // Tycoon Build Functions
         function createButton(x, z, text, cost, onBuy) {
-            const btnColor = cost === 0 ? 0x00FF00 : 0xFF0000;
+            const canAfford = cash >= cost;
+            const btnColor = canAfford ? 0x00FF00 : 0xFF0000;
             const btnGroup = new THREE.Group();
             btnGroup.position.set(x, 0.1, z);
 
-            const pad = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 16), new THREE.MeshLambertMaterial({color: btnColor}));
+            const padMat = new THREE.MeshLambertMaterial({color: btnColor});
+            const pad = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 16), padMat);
             pad.castShadow = true; pad.receiveShadow = true;
             btnGroup.add(pad);
 
-            const sprite = createTextSprite(`${text} ($${cost})`, cost === 0 ? '#00FF00' : '#FF0000');
+            const tex = createTextTexture(`${text} ($${cost})`, canAfford ? '#00FF00' : '#FF0000');
+            const spriteMat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(6, 3, 1);
             sprite.position.y = 2;
             btnGroup.add(sprite);
 
             scene.add(btnGroup);
-            activeButtons.push({ group: btnGroup, cost: cost, action: onBuy });
+            activeButtons.push({ 
+                group: btnGroup, 
+                cost: cost, 
+                action: onBuy,
+                text: text,
+                padMat: padMat,
+                spriteMat: spriteMat,
+                canAfford: canAfford // Save state to check for changes
+            });
         }
 
         function createDropper(x, y, z) {
@@ -336,25 +337,19 @@
         }
 
         // --- TYCOON PROGRESSION SCRIPT ---
-        
-        // Stage 1: The Start
         createButton(0, 5, "Claim Tycoon", 0, () => {
             createCollector(0, 0.25, -2);
             createDropper(0, 6, -8);
-            // Spawn next button
             createButton(-5, 5, "Dropper 2", 50, () => {
                 createDropper(-4, 6, -8);
-                // Spawn next button
                 createButton(5, 5, "Upgrade Value", 150, () => {
                     dropValue = 20;
-                    // Spawn final button
                     createButton(0, 8, "Build Walls", 300, () => {
                         createWalls();
                     });
                 });
             });
         });
-
 
         // --- 5. MAIN LOOP ---
         const clock = new THREE.Clock();
@@ -380,7 +375,7 @@
                 moveX += joystickVector.x;
             }
 
-            // Apply movement relative to camera angle
+            // FIXED ADDITION: Movement relative to Camera Direction
             if (moveX !== 0 || moveZ !== 0) {
                 // Bobbing animation for player
                 legL.rotation.x = Math.sin(time * 10) * 0.5;
@@ -388,16 +383,34 @@
                 armL.rotation.x = Math.sin(time * 10 + Math.PI) * 0.5;
                 armR.rotation.x = Math.sin(time * 10) * 0.5;
 
-                const dir = new THREE.Vector2(moveX, moveZ).normalize();
-                
-                // Calculate actual world direction based on camera orbit angle
-                const walkAngle = Math.atan2(dir.y, dir.x) + camAngle + Math.PI/2;
-                
-                player.position.x += Math.cos(walkAngle) * speed * 1.5;
-                player.position.z += Math.sin(walkAngle) * speed * 1.5;
+                // Grab the exact direction the camera is looking
+                const cameraDir = new THREE.Vector3();
+                camera.getWorldDirection(cameraDir);
+                cameraDir.y = 0; // Flatten it so you don't fly into the sky/ground
+                cameraDir.normalize();
 
-                // Rotate player mesh to face movement direction
-                player.rotation.y = -walkAngle + Math.PI/2;
+                // Calculate the true "right" side of the camera
+                const cameraRight = new THREE.Vector3();
+                cameraRight.crossVectors(cameraDir, camera.up).normalize();
+
+                // Build a unified directional vector based on input
+                const moveVec = new THREE.Vector3();
+                moveVec.addScaledVector(cameraDir, -moveZ); // Forwards/Backwards
+                moveVec.addScaledVector(cameraRight, moveX); // Sideways
+
+                if (moveVec.lengthSq() > 0) {
+                    moveVec.normalize();
+                    
+                    // Allow joystick to have variable "walking speeds" 
+                    const inputMagnitude = Math.min(1, Math.sqrt(moveX * moveX + moveZ * moveZ));
+                    const actualSpeed = speed * 1.5 * inputMagnitude;
+
+                    player.position.addScaledVector(moveVec, actualSpeed);
+
+                    // Rotate player mesh to face movement direction
+                    const targetAngle = Math.atan2(moveVec.x, moveVec.z);
+                    player.rotation.y = targetAngle;
+                }
             } else {
                 // Reset limbs
                 legL.rotation.x = 0; legR.rotation.x = 0;
@@ -406,9 +419,9 @@
 
             // Camera Orbit Logic
             camera.position.x = player.position.x + camDistance * Math.cos(camPitch) * Math.sin(camAngle);
-            camera.position.y = player.position.y + 3 + camDistance * Math.sin(camPitch);
+            camera.position.y = player.position.y + 1 + camDistance * Math.sin(camPitch); // Adjusted target slightly for new Y pos
             camera.position.z = player.position.z + camDistance * Math.cos(camPitch) * Math.cos(camAngle);
-            camera.lookAt(player.position.x, player.position.y + 2, player.position.z);
+            camera.lookAt(player.position.x, player.position.y, player.position.z);
 
             // Tycoon Logic: Dropping Items
             if (Date.now() - lastDropTime > dropInterval) {
@@ -427,13 +440,11 @@
                 const item = droppedItems[i];
                 item.position.y -= 3 * delta; // Falling
                 
-                // Once it hits the conveyor, move it forward
                 if (item.position.y <= 0.8) {
                     item.position.y = 0.8;
                     item.position.z += 4 * delta; 
                 }
 
-                // Check collision with collector
                 if (collectorZone) {
                     const dist = item.position.distanceTo(collectorZone.position);
                     if (dist < 2.5) {
@@ -444,17 +455,34 @@
                     }
                 }
 
-                // Despawn if it falls off map somehow
                 if (item.position.y < -5 || item.position.z > 20) {
                     scene.remove(item);
                     droppedItems.splice(i, 1);
                 }
             }
 
+            // FIXED BUG 2: Dynamic Button Coloring check
+            for (let i = 0; i < activeButtons.length; i++) {
+                const btn = activeButtons[i];
+                const canAfford = cash >= btn.cost;
+
+                // If affordability state changes, update the material color and text!
+                if (btn.canAfford !== canAfford) {
+                    btn.canAfford = canAfford;
+                    const newColor = canAfford ? 0x00FF00 : 0xFF0000;
+                    
+                    btn.padMat.color.setHex(newColor); // Update the pad
+                    
+                    // Update floating text sprite safely
+                    const newTex = createTextTexture(`${btn.text} ($${btn.cost})`, canAfford ? '#00FF00' : '#FF0000');
+                    if (btn.spriteMat.map) btn.spriteMat.map.dispose(); 
+                    btn.spriteMat.map = newTex; 
+                }
+            }
+
             // Tycoon Logic: Button Stepping
             for (let i = activeButtons.length - 1; i >= 0; i--) {
                 const btn = activeButtons[i];
-                // Check 2D distance (X, Z) to player
                 const dx = player.position.x - btn.group.position.x;
                 const dz = player.position.z - btn.group.position.z;
                 const dist = Math.sqrt(dx*dx + dz*dz);
